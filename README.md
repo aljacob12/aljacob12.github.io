@@ -74,7 +74,7 @@ candy = read.csv("candy-data.csv", row.names=1)
 head(candy)
 ```
 
-# Q1. How many different candy types are in this dataset?
+#Q1. How many different candy types are in this dataset?
 ```{r}
 dim(candy)
 ```
@@ -169,7 +169,7 @@ ggplot(candy) +
   aes(x=winpercent, y=rownames(candy)) +
   geom_col()
 ```
-# organized graph:
+#organized graph:
 ```{r}
 library(ggplot2)
 
@@ -262,3 +262,186 @@ barplot(pca$rotation[,1], las=2, ylab="PC1 Contribution")
 
 Fruity, hard, and pluribus variables are picked up strongly by PC1 in the positive direction, which makes sense because these types of candies are less popular than the average and would be "overestimated" in PC1 plot. 
 
+# Class 12
+##Bioconductor and DESeq2 setup
+```{r}
+library(BiocManager)
+library(DESeq2)
+```
+
+##Import countData and colData
+```{r}
+counts <- read.csv("airway_scaledcounts.csv", row.names=1)
+metadata <-  read.csv("airway_metadata.csv")
+head(counts)
+head(metadata)
+```
+
+>Q1. How many genes are in this dataset?
+>Q2. How many ‘control’ cell lines do we have?
+
+
+##Toy differential gene expression
+```{r}
+control <- metadata[metadata[,"dex"]=="control",]
+control.counts <- counts[ ,control$id]
+control.mean <- rowSums( control.counts )/4 
+head(control.mean)
+```
+
+>Q3. How would you make the above code in either approach more robust?
+>Q4. Follow the same procedure for the treated samples (i.e. calculate the mean per gene across drug treated samples and assign to a labeled vector called treated.mean)
+
+
+```{r}
+library(dplyr)
+control <- metadata %>% filter(dex=="control")
+control.counts <- counts %>% select(control$id) 
+control.mean <- rowSums(control.counts)/4
+head(control.mean)
+```
+
+```{r}
+treated <- metadata[metadata[,"dex"]=="treated",]
+treated.mean <- rowSums( counts[ ,treated$id] )/4 
+names(treated.mean) <- counts$ensgene
+```
+
+```{r}
+meancounts <- data.frame(control.mean, treated.mean)
+```
+
+>Q5 (a). Create a scatter plot showing the mean of the treated samples against the mean of the control samples. Your plot should look something like the following
+>Q5 (b).You could also use the ggplot2 package to make this figure producing the plot below. What geom_?() function would you use for this plot
+
+```{r}
+plot(meancounts[,1],meancounts[,2], xlab="Control", ylab="Treated")
+```
+
+```{r}
+meancounts$log2fc <- log2(meancounts[,"treated.mean"]/meancounts[,"control.mean"])
+head(meancounts)
+```
+
+
+```{r}
+zero.vals <- which(meancounts[,1:2]==0, arr.ind=TRUE)
+
+to.rm <- unique(zero.vals[,1])
+mycounts <- meancounts[-to.rm,]
+head(mycounts)
+```
+
+
+```{r}
+up.ind <- mycounts$log2fc > 2
+down.ind <- mycounts$log2fc < (-2)
+```
+
+
+##DESeq2 analysis
+
+
+## Gene annotation
+
+Use one of bioconductors's main annotation packages to help with mapping between various ID schemes.
+```{r}
+head(res)
+row.names(res)
+```
+
+
+```{r}
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+```
+
+
+Look at what types of IDs I can translate between from the 'org.Hs.eg.b'
+```{r}
+columns(org.Hs.eg.db)
+```
+
+
+```{r}
+res$symbol <- mapIds(org.Hs.eg.db,
+                     keys=row.names(res),  # Our genenames
+                     keytype="ENSEMBL",        # The format of our genenames
+                     column="SYMBOL",          # The new format we want to add
+                     multiVals="first")
+```
+
+
+```{r}
+res$entrez <- mapIds(org.Hs.eg.db,
+                     keys=row.names(res),
+                     column="ENTREZID",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+
+res$uniprot <- mapIds(org.Hs.eg.db,
+                     keys=row.names(res),
+                     column="UNIPROT",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+
+res$genename <- mapIds(org.Hs.eg.db,
+                     keys=row.names(res),
+                     column="GENENAME",
+                     keytype="ENSEMBL",
+                     multiVals="first")
+
+head(res)
+```
+
+## Pathway analysis
+
+Here we play with just one, the GAGE package (which stands for Generally Applicable Gene set Enrichment), to do KEGG pathway enrichment analysis on our RNA-seq based differential expression results.
+
+
+```{r}
+library(pathview)
+library(gage)
+library(gageData)
+
+data(kegg.sets.hs)
+head(kegg.sets.hs, 2)
+```
+
+
+The main gage() function requires a named vector of fold changes, where the names of the values are the Entrez gene IDs.
+
+```{r}
+foldchanges <- res$log2FoldChange
+names(foldchanges) <- res$entrez
+head(foldchanges)
+```
+
+Now, let’s run the gage pathway analysis.
+
+```{r}
+keggres = gage(foldchanges, gsets=kegg.sets.hs)
+```
+
+Now lets look at the object returned from gage(). our results here:
+
+```{r}
+attributes(keggres)
+```
+
+
+```{r}
+# Look at the first three down (less) pathways
+head(keggres$less, 3)
+```
+
+
+Lets pull up the highlighted pathways and show our differentially expressed genes on the pathway. 
+
+```{r}
+pathview(gene.data=foldchanges, pathway.id="hsa05310")
+```
+
+
+put this into my document
+![The asthma pathway with my highlighted differentially expressed genes in color](hsa05310.pathview.png)
